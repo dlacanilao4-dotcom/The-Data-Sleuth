@@ -738,131 +738,167 @@
         }
 
 
-        // --- 6. FIREBASE/FIRESTORE INTEGRATION ---
+       // --- 0. Firebase Imports ---
+// Make sure you've installed the Firebase JS SDK:
+// npm install firebase
+// or
+// yarn add firebase
 
-        async function initFirebase() {
-            try {
-                // Global vars provided by the environment
-                const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-                const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
+import { initializeApp } from "firebase/app";
+import { getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged } from "firebase/auth";
+import { getFirestore, collection, addDoc, query, limit, onSnapshot } from "firebase/firestore";
+// If you're using Firebase Analytics, uncomment the line below:
+// import { getAnalytics } from "firebase/analytics";
 
-                if (Object.keys(firebaseConfig).length === 0) {
-                    console.error("Firebase config is missing.");
-                    return;
-                }
-                
-                const app = initializeApp(firebaseConfig);
-                auth = getAuth(app);
-                db = getFirestore(app);
+// --- 1. Your Web App's Firebase Configuration ---
+// These values are specific to YOUR project (game-de8ec).
+// You'll find 'apiKey', 'messagingSenderId', and 'appId' in your Firebase Console
+// under Project settings > General > Your apps.
+const firebaseConfig = {
+  apiKey: "AIzaSyDbZE77vVbrJ63BxStmz_ozcobvrVZO1_A", // <--- GET THIS FROM YOUR FIREBASE CONSOLE
+  authDomain: "game-de8ec.firebaseapp.com",
+  projectId: "game-de8ec",
+  storageBucket: "game-de8ec.firebasestorage.app",
+  messagingSenderId: "186937935660", // <--- GET THIS FROM YOUR FIREBASE CONSOLE
+  appId: "1:186937935660:web:c1b89d19bcd758ad994e89",
+  measurementId: "G-S8M210N7MZ"// <--- GET THIS FROM YOUR FIREBASE CONSOLE
+  // If using Google Analytics, your measurementId would be related to 515381564
+  // measurementId: "G-YOUR_MEASUREMENT_ID" // <--- GET THIS FROM YOUR FIREBASE CONSOLE if needed
+};
 
-                // 1. Authenticate using the provided token or anonymously
-                const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
-                if (initialAuthToken) {
-                    await signInWithCustomToken(auth, initialAuthToken);
-                } else {
-                    await signInAnonymously(auth);
-                }
+// --- 2. Global Variables ---
+// Declare these globally or pass them around as needed
+let auth;
+let db;
+let userId = null;
+let isAuthReady = false;
 
-                // 2. Set up Auth State Listener
-                onAuthStateChanged(auth, (user) => {
-                    if (user) {
-                        userId = user.uid;
-                        isAuthReady = true;
-                        document.getElementById('user-id-display').textContent = `User ID: ${userId}`;
-                        loadLeaderboard();
-                    } else {
-                        userId = null; 
-                        isAuthReady = true;
-                        document.getElementById('user-id-display').textContent = 'User ID: Anonymous';
-                        loadLeaderboard();
-                    }
-                });
+// --- 3. FIREBASE/FIRESTORE INTEGRATION ---
 
-            } catch (error) {
-                console.error("Error initializing Firebase:", error);
-            }
+async function initFirebase() {
+    try {
+        // Initialize Firebase app with your specific configuration
+        const app = initializeApp(firebaseConfig);
+        auth = getAuth(app);
+        db = getFirestore(app);
+
+        // If using Firebase Analytics, initialize it here:
+        // const analytics = getAnalytics(app);
+
+        // 1. Authenticate using the provided token or anonymously
+        // This '__initial_auth_token' must be provided by your environment or backend.
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+        if (initialAuthToken) {
+            await signInWithCustomToken(auth, initialAuthToken);
+        } else {
+            await signInAnonymously(auth);
         }
 
-        async function saveScore() {
-            if (!isAuthReady || !db || !userId) return;
+        // 2. Set up Auth State Listener
+        onAuthStateChanged(auth, (user) => {
+            if (user) {
+                userId = user.uid;
+                isAuthReady = true;
+                document.getElementById('user-id-display').textContent = `User ID: ${userId}`;
+                loadLeaderboard();
+            } else {
+                userId = null; 
+                isAuthReady = true;
+                document.getElementById('user-id-display').textContent = 'User ID: Anonymous';
+                loadLeaderboard();
+            }
+        });
 
-            // Get player name, sanitize it
-            const playerName = document.getElementById('player-name-input').value.trim().replace(/[^a-zA-Z0-9 ]/g, '') || `Sleuth-${userId.substring(0, 4)}`;
-            
-            // Public collection path for the leaderboard
-            const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-            const leaderboardCollectionPath = `/artifacts/${appId}/public/data/leaderboard`;
+    } catch (error) {
+        console.error("Error initializing Firebase:", error);
+    }
+}
 
+async function saveScore() {
+    if (!isAuthReady || !db || !userId) return;
+
+    // Get player name, sanitize it
+    const playerName = document.getElementById('player-name-input').value.trim().replace(/[^a-zA-Z0-9 ]/g, '') || `Sleuth-${userId.substring(0, 4)}`;
+    
+    // Public collection path for the leaderboard
+    // Simplified to a direct collection named 'leaderboard'
+    const leaderboardCollectionPath = "leaderboard"; 
+
+    try {
+        // Retry logic for API call (Exponential Backoff)
+        const maxRetries = 3;
+        for (let i = 0; i < maxRetries; i++) {
             try {
-                // Retry logic for API call (Exponential Backoff)
-                const maxRetries = 3;
-                for (let i = 0; i < maxRetries; i++) {
-                    try {
-                        await addDoc(collection(db, leaderboardCollectionPath), {
-                            name: playerName,
-                            score: totalScore,
-                            level: currentLevel - 1,
-                            timestamp: Date.now(),
-                            userId: userId,
-                        });
-                        displayFeedback("Score saved to the real-time leaderboard!", 'bg-emerald-700');
-                        return; // Success, exit loop
-                    } catch (e) {
-                        if (i === maxRetries - 1) throw e; // Last retry, re-throw error
-                        const delay = Math.pow(2, i) * 1000;
-                        await new Promise(resolve => setTimeout(resolve, delay));
-                    }
-                }
+                await addDoc(collection(db, leaderboardCollectionPath), {
+                    name: playerName,
+                    score: totalScore, // Assuming 'totalScore' is defined elsewhere
+                    level: currentLevel - 1, // Assuming 'currentLevel' is defined elsewhere
+                    timestamp: Date.now(),
+                    userId: userId,
+                });
+                displayFeedback("Score saved to the real-time leaderboard!", 'bg-emerald-700'); // Assuming 'displayFeedback' is defined elsewhere
+                return; // Success, exit loop
             } catch (e) {
-                console.error("Error adding document: ", e);
-                displayFeedback("Error saving score to leaderboard.", 'bg-red-800');
+                if (i === maxRetries - 1) throw e; // Last retry, re-throw error
+                const delay = Math.pow(2, i) * 1000;
+                await new Promise(resolve => setTimeout(resolve, delay));
             }
         }
+    } catch (e) {
+        console.error("Error adding document: ", e);
+        displayFeedback("Error saving score to leaderboard.", 'bg-red-800'); // Assuming 'displayFeedback' is defined elsewhere
+    }
+}
 
-        function loadLeaderboard() {
-            if (!isAuthReady || !db) return;
+function loadLeaderboard() {
+    if (!isAuthReady || !db) return;
 
-            const leaderboardEl = document.getElementById('leaderboard');
-            const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-            const leaderboardCollectionPath = `/artifacts/${appId}/public/data/leaderboard`;
+    const leaderboardEl = document.getElementById('leaderboard');
+    // Simplified to a direct collection named 'leaderboard'
+    const leaderboardCollectionPath = "leaderboard"; 
 
-            // Query the top 50 scores for sorting
-            const q = query(collection(db, leaderboardCollectionPath), limit(50));
+    // Query the top 50 scores for sorting
+    // Note: Firestore queries limit documents _returned_, not necessarily the top N by score efficiently.
+    // For large leaderboards, you might need more advanced strategies (like the tree or stochastic ones we discussed previously).
+    const q = query(collection(db, leaderboardCollectionPath), limit(50));
 
-            onSnapshot(q, (querySnapshot) => {
-                let scores = [];
-                querySnapshot.forEach((doc) => {
-                    scores.push(doc.data());
-                });
+    onSnapshot(q, (querySnapshot) => {
+        let scores = [];
+        querySnapshot.forEach((doc) => {
+            scores.push(doc.data());
+        });
 
-                // Sort scores locally by score descending
-                scores.sort((a, b) => b.score - a.score);
-                const topScores = scores.slice(0, 10); // Take only the top 10 for display
+        // Sort scores locally by score descending
+        // If your leaderboard can get very large, performing this client-side sorting
+        // on a large number of documents might become inefficient.
+        scores.sort((a, b) => b.score - a.score);
+        const topScores = scores.slice(0, 10); // Take only the top 10 for display
 
-                leaderboardEl.innerHTML = '';
-                if (topScores.length === 0) {
-                    leaderboardEl.innerHTML = '<li class="text-slate-500">Be the first to post a score!</li>';
-                    return;
-                }
-
-                topScores.forEach((entry, index) => {
-                    const li = document.createElement('li');
-                    li.className = 'py-1 flex justify-between items-center ' + (index === 0 ? 'text-yellow-400 font-bold text-lg' : 'text-slate-300');
-                    const rankIcon = index < 3 ? ['🏆', '🥈', '🥉'][index] : (index + 1) + '.';
-                    li.innerHTML = `
-                        <span class="flex items-center space-x-2">
-                            <span class="text-lg w-6 text-center">${rankIcon}</span>
-                            <span class="truncate">${entry.name}</span>
-                        </span>
-                        <span class="text-xl font-mono text-cyan-300">${entry.score}</span>
-                    `;
-                    leaderboardEl.appendChild(li);
-                });
-            }, (error) => {
-                console.error("Error listening to leaderboard:", error);
-                leaderboardEl.innerHTML = '<li class="text-red-400">Error loading scores.</li>';
-            });
+        leaderboardEl.innerHTML = '';
+        if (topScores.length === 0) {
+            leaderboardEl.innerHTML = '<li class="text-slate-500">Be the first to post a score!</li>';
+            return;
         }
+
+        topScores.forEach((entry, index) => {
+            const li = document.createElement('li');
+            li.className = 'py-1 flex justify-between items-center ' + (index === 0 ? 'text-yellow-400 font-bold text-lg' : 'text-slate-300');
+            const rankIcon = index < 3 ? ['🏆', '🥈', '🥉'][index] : (index + 1) + '.';
+            li.innerHTML = `
+                <span class="flex items-center space-x-2">
+                    <span class="text-lg w-6 text-center">${rankIcon}</span>
+                    <span class="truncate">${entry.name}</span>
+                </span>
+                <span class="text-xl font-mono text-cyan-300">${entry.score}</span>
+            `;
+            leaderboardEl.appendChild(li);
+        });
+    }, (error) => {
+        console.error("Error listening to leaderboard:", error);
+        leaderboardEl.innerHTML = '<li class="text-red-400">Error loading scores.</li>';
+    });
+}
+
 
 
         // --- 7. INITIALIZATION AND SETUP ---
@@ -945,4 +981,5 @@
         window.onload = init;
     </script>
 </body>
+
 </html>
