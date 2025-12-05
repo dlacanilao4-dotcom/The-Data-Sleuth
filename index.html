@@ -1,0 +1,948 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>The Data Sleuth: Single Clue Deduction</title>
+    <!-- Load Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght%40400;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #0F172A; /* Slate-900 */
+            color: #E2E8F0; /* Slate-200 */
+            overflow-x: hidden;
+            position: relative;
+            min-height: 100vh;
+        }
+
+        /* --- BACKGROUND ANIMATION STYLES --- */
+        .animated-bg {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: -1;
+            overflow: hidden;
+        }
+
+        .data-stream {
+            position: absolute;
+            background: rgba(37, 99, 235, 0.15); /* Blue-600 subtle */
+            opacity: 0.5;
+            animation: data-flow 25s linear infinite;
+            filter: blur(10px);
+        }
+
+        .data-stream:nth-child(1) { width: 300%; height: 50px; top: 10%; left: -200%; transform: rotate(10deg); animation-duration: 30s; }
+        .data-stream:nth-child(2) { width: 250%; height: 80px; top: 50%; left: -150%; transform: rotate(-5deg); animation-duration: 22s; }
+        .data-stream:nth-child(3) { width: 400%; height: 30px; top: 80%; left: -300%; transform: rotate(2deg); animation-duration: 35s; }
+
+        @keyframes data-flow {
+            0% { transform: translateX(0) rotate(var(--rotation, 0deg)); opacity: 0.3; }
+            50% { opacity: 0.6; }
+            100% { transform: translateX(100vw) rotate(var(--rotation, 0deg)); opacity: 0.3; }
+        }
+
+        /* --- GAME GRID & Item Styles --- */
+        .sleuth-container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 1rem;
+            position: relative;
+            z-index: 10;
+        }
+        .game-grid {
+            grid-template-columns: repeat(5, minmax(0, 1fr));
+            grid-auto-rows: 1fr;
+            aspect-ratio: 1 / 1;
+            max-width: 100%;
+        }
+        .grid-item {
+            cursor: pointer;
+            transition: all 0.2s ease-in-out;
+            opacity: 1;
+            transform: scale(1);
+            position: relative;
+            padding: 0;
+        }
+        .grid-item.eliminated {
+            opacity: 0.15;
+            pointer-events: none;
+            transform: scale(0.95) rotate(5deg);
+        }
+        .grid-item:not(.eliminated):hover {
+            box-shadow: 0 0 15px #60A5FA;
+            transform: scale(1.05);
+            z-index: 10;
+        }
+        .grid-item.target-found {
+            border: 5px solid #10B981;
+            box-shadow: 0 0 30px #10B981;
+            animation: pulse-green 1s infinite alternate;
+            transform: scale(1.15);
+            z-index: 20;
+        }
+
+        /* SINGLE CLUE DISPLAY STYLES */
+        #current-clue-display {
+            transition: all 0.5s ease;
+            min-height: 48px; /* Ensure space even when hidden */
+            padding: 0.75rem;
+            border-radius: 0.5rem;
+            text-align: center;
+        }
+        .clue-hidden {
+            opacity: 0.5;
+            background-color: #1F2937; /* Gray-800 */
+            color: #6B7280; /* Gray-500 */
+        }
+        .clue-visible {
+            opacity: 1;
+            background-color: #1E3A8A; /* Blue-800 */
+            color: #BFDBFE; /* Blue-200 */
+            box-shadow: 0 0 20px rgba(59, 130, 246, 0.7);
+            transform: scale(1.02);
+            font-weight: 700;
+        }
+        .clue-timer-bar {
+            height: 4px;
+            background-color: #3B82F6; /* Blue-500 */
+            width: 100%;
+            transition: width linear;
+        }
+
+
+        @keyframes pulse-green {
+            from { box-shadow: 0 0 15px #10B981; }
+            to { box-shadow: 0 0 40px #10B981; }
+        }
+        .wrong-guess-effect {
+            animation: shake 0.5s;
+        }
+        @keyframes shake {
+            0%, 100% { transform: translateX(0); }
+            20%, 60% { transform: translateX(-6px); }
+            40%, 80% { transform: translateX(6px); }
+        }
+        
+        /* Custom Button Style */
+        .sleuth-button {
+            transition: all 0.2s ease-in-out;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            font-weight: 700;
+        }
+        .sleuth-button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 15px rgba(0, 0, 0, 0.3);
+        }
+    </style>
+</head>
+<body>
+    <!-- Animated Background -->
+    <div class="animated-bg">
+        <div class="data-stream" style="--rotation: 10deg;"></div>
+        <div class="data-stream" style="--rotation: -5deg;"></div>
+        <div class="data-stream" style="--rotation: 2deg;"></div>
+    </div>
+
+    <div class="sleuth-container">
+
+        <header class="text-center py-6 md:py-8">
+            <h1 class="text-4xl md:text-6xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-cyan-400 tracking-wider">
+                THE DATA SLEUTH
+            </h1>
+            <p class="text-slate-400 mt-2 text-xl font-light">
+                Deduce the Target by Eliminating Subsets
+            </p>
+        </header>
+
+        <!-- TOP PANEL: Stats, Clues, and Timer -->
+        <div class="bg-slate-800 p-4 md:p-8 rounded-2xl shadow-2xl border border-blue-900/50 mb-6 max-w-xl mx-auto">
+            
+            <!-- Global Stats -->
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-4 text-center border-b border-slate-700 pb-4 mb-4">
+                <div class="p-3 bg-slate-700 rounded-xl shadow-inner border border-slate-600/50">
+                    <p class="text-sm font-medium text-slate-400">Level</p>
+                    <span id="current-level" class="text-yellow-400 text-3xl font-extrabold">1</span>
+                </div>
+                <div class="p-3 bg-slate-700 rounded-xl shadow-inner border border-slate-600/50">
+                    <p class="text-sm font-medium text-slate-400">Score</p>
+                    <span id="current-score" class="text-emerald-400 text-3xl font-extrabold">0</span>
+                </div>
+                <div class="p-3 bg-slate-700 rounded-xl shadow-inner border border-slate-600/50">
+                    <p class="text-sm font-medium text-slate-400">Time Left</p>
+                    <!-- Displayed time is the starting time, but countdown won't start until the first clue -->
+                    <span id="timer-display" class="text-red-400 text-3xl font-extrabold">0:60</span>
+                </div>
+                <div class="p-3 bg-slate-700 rounded-xl shadow-inner border border-slate-600/50">
+                    <p class="text-sm font-medium text-slate-400">Lives</p>
+                    <span id="lives-display" class="text-3xl">❤️❤️❤️</span>
+                </div>
+            </div>
+
+            <!-- Single Clue Display Section -->
+            <div class="text-center mt-4">
+                <h2 class="text-xl font-bold text-cyan-400 mb-2">HINT (Clue <span id="clue-number-display">0</span> of 3)</h2>
+                
+                <!-- Main Clue Box -->
+                <div id="current-clue-container" class="relative rounded-lg overflow-hidden transition-all duration-300">
+                    <div id="current-clue-display" class="text-lg font-mono clue-hidden">
+                        Press the button below to start the timer and reveal the first clue.
+                    </div>
+                    <div id="clue-timer-bar" class="clue-timer-bar" style="width: 100%;"></div>
+                </div>
+
+                <div id="clue-action-area" class="mt-4">
+                    <button id="reveal-next-clue-button" class="sleuth-button bg-yellow-600 hover:bg-yellow-500 text-slate-900 py-3 px-6 rounded-xl transition duration-200 shadow-lg text-sm disabled:opacity-50 disabled:shadow-none">
+                        Reveal Clue 1 (Hidden)
+                    </button>
+                    <p id="clue-status-message" class="text-xs text-slate-400 mt-2">Timer starts when the first clue is revealed.</p>
+                </div>
+            </div>
+            
+            <div id="feedback-message" class="mt-6 p-4 rounded-xl text-slate-200 hidden text-center font-semibold"></div>
+
+        </div>
+
+        <!-- MAIN GAME GRID -->
+        <div class="flex justify-center">
+            <div id="game-grid" class="game-grid grid gap-3 md:gap-5 bg-slate-900 p-3 md:p-6 rounded-2xl border-4 border-slate-700 shadow-2xl w-full max-w-xl">
+                <!-- Items will be generated here -->
+            </div>
+        </div>
+        
+        <!-- Leaderboard and User Info -->
+        <div class="bg-slate-800 p-6 rounded-2xl shadow-2xl border border-blue-900/50 mt-6 max-w-xl mx-auto">
+            <h2 class="text-xl font-bold text-cyan-400 mb-4 border-b border-slate-700 pb-2">Top Sleuths (Real-Time Leaderboard)</h2>
+            <ol id="leaderboard" class="list-decimal pl-5 text-slate-300 min-h-[100px] space-y-1">
+                <li class="text-slate-500">Loading leaderboard...</li>
+            </ol>
+            <p id="user-id-display" class="mt-4 text-xs text-slate-500 break-all pt-2 border-t border-slate-700">User ID: Loading...</p>
+        </div>
+
+
+        <!-- Modal for Game Start / Win / Loss / Instructions -->
+        <div id="game-modal" class="fixed inset-0 bg-black bg-opacity-85 flex items-center justify-center p-4 z-50 hidden backdrop-blur-sm">
+            <div class="bg-slate-900 p-8 rounded-2xl shadow-3xl max-w-lg w-full text-center border-4 border-blue-500 max-h-[90vh] overflow-y-auto">
+                <h2 id="modal-title" class="text-4xl font-extrabold mb-4 text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-cyan-400"></h2>
+                <p id="modal-message" class="text-slate-300 mb-6 text-lg"></p>
+                
+                <!-- Instructions Content -->
+                <div id="instructions-content" class="text-left text-sm bg-slate-800 p-5 rounded-xl mb-6 border border-slate-700">
+                    <h3 class="text-lg font-bold text-yellow-400 mb-3">How to Play:</h3>
+                    <ol class="list-decimal list-inside space-y-2 text-slate-400">
+                        <li>The Grid: The 5x5 grid contains 25 unique items.</li>
+                        <li>The Goal: Find the single hidden 'Target Item'.</li>
+                        <li>The Clues: You have 3 clues. Each clue is only visible for 10 seconds!</li>
+                        <li>Starting the Game: The main countdown timer starts only when you click 'Reveal Clue 1'.</li>
+                        <li>Deduction: Eliminate (do not click) items that 'do not' match the revealed clues.</li>
+                        <li>Guessing: Click on the tile you believe is the Target Item.</li>
+                        <li>Penalties:
+                            <ul class="list-disc list-inside ml-4 mt-1">
+                                <li>Incorrect Guess: Lose 1 Life and incur a -5 second time penalty.</li>
+                                <li>An incorrect guess 'immediately' reveals the next unrevealed clue (for 10 seconds).</li>
+                            </ul>
+                        </li>
+                        <li>Winning: Find the Target Item before time runs out or you lose all 3 lives. Good luck, Sleuth!</li>
+                    </ol>
+                </div>
+
+                <div id="modal-content">
+                    <input type="text" id="player-name-input" placeholder="Enter your Sleuth Name"
+                           class="bg-slate-800 border-2 border-blue-500 text-white p-3 rounded-lg mb-4 w-full text-center focus:outline-none focus:ring-2 focus:ring-cyan-400" maxlength="15" />
+                </div>
+                <button id="modal-action-button" class="sleuth-button bg-blue-600 hover:bg-blue-500 text-white py-3 px-8 rounded-xl transition duration-200 shadow-xl shadow-blue-800/50">
+                    Start Level 1
+                </button>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- Firebase SDK Imports -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js"; 
+        import { getFirestore, collection, addDoc, onSnapshot, query, limit } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        
+        // --- 1. GAME CONSTANTS AND DATA DEFINITIONS ---
+
+        const MAX_LIVES = 3;
+        const STARTING_SCORE = 0;
+        const POINTS_PER_LEVEL = 100;
+        const POINTS_PER_SECOND_BONUS = 2;
+        const WRONG_GUESS_TIME_PENALTY = 5; 
+        const BASE_TIME = 60; // Starting time in seconds
+        const CLUE_VISIBILITY_DURATION = 10000; // 10 seconds in milliseconds
+
+        const ATTRIBUTES = {
+            colors: ['Red', 'Blue', 'Green', 'Yellow', 'Purple'],
+            shapes: ['Circle', 'Square', 'Star', 'Triangle', 'Hexagon'],
+            patterns: ['Solid', 'Striped', 'Dotted']
+        };
+
+        const COLOR_MAP = {
+            'Red': '#EF4444',    // red-500
+            'Blue': '#3B82F6',   // blue-500
+            'Green': '#10B981',  // emerald-500
+            'Yellow': '#F59E0B', // amber-500
+            'Purple': '#8B5CF6'  // violet-500
+        };
+
+        // Full 5x5 grid definition (25 unique combinations using C, S, P)
+        const GRID_ITEMS_DEFINITION = [
+            { c: 'Red', s: 'Circle', p: 'Solid', index: 0 }, { c: 'Red', s: 'Square', p: 'Striped', index: 1 }, { c: 'Red', s: 'Star', p: 'Dotted', index: 2 }, { c: 'Red', s: 'Triangle', p: 'Solid', index: 3 }, { c: 'Red', s: 'Hexagon', p: 'Striped', index: 4 },
+            { c: 'Blue', s: 'Circle', p: 'Dotted', index: 5 }, { c: 'Blue', s: 'Square', p: 'Solid', index: 6 }, { c: 'Blue', s: 'Star', p: 'Striped', index: 7 }, { c: 'Blue', s: 'Triangle', p: 'Dotted', index: 8 }, { c: 'Blue', s: 'Hexagon', p: 'Solid', index: 9 },
+            { c: 'Green', s: 'Circle', p: 'Striped', index: 10 }, { c: 'Green', s: 'Square', p: 'Dotted', index: 11 }, { c: 'Green', s: 'Star', p: 'Solid', index: 12 }, { c: 'Green', s: 'Triangle', p: 'Striped', index: 13 }, { c: 'Green', s: 'Hexagon', p: 'Dotted', index: 14 },
+            { c: 'Yellow', s: 'Circle', p: 'Solid', index: 15 }, { c: 'Yellow', s: 'Square', p: 'Striped', index: 16 }, { c: 'Yellow', s: 'Star', p: 'Dotted', index: 17 }, { c: 'Yellow', s: 'Triangle', p: 'Solid', index: 18 }, { c: 'Yellow', s: 'Hexagon', p: 'Striped', index: 19 },
+            { c: 'Purple', s: 'Circle', p: 'Dotted', index: 20 }, { c: 'Purple', s: 'Square', p: 'Solid', index: 21 }, { c: 'Purple', s: 'Star', p: 'Striped', index: 22 }, { c: 'Purple', s: 'Triangle', p: 'Dotted', index: 23 }, { c: 'Purple', s: 'Hexagon', p: 'Solid', index: 24 }
+        ];
+
+        // Clue Templates modified to match user's requested format ("The target is X")
+        const CLUE_TEMPLATES = {
+            C: (c) => `The target's color is ${c}`,
+            S: (s) => `The target's shape is ${s}`,
+            P: (p) => `The target's pattern is ${p}`
+        };
+
+        // --- 2. STATE VARIABLES & FIREBASE ---
+        let targetItem = null;
+        let currentLevel = 1;
+        let totalScore = STARTING_SCORE;
+        let currentLives = MAX_LIVES;
+        let timerInterval = null;
+        let timeRemaining = 0;
+        let isGameOver = false;
+        let levelClues = [];
+        let cluesRevealed = 0;
+        let clueTimeout = null; // Single timeout for the current clue visibility
+        let clueInterval = null; // Interval for the timer bar animation
+
+        // Firebase State
+        let db = null;
+        let auth = null;
+        let userId = null;
+        let isAuthReady = false;
+        
+        // --- 3. SVG GENERATION HELPERS (Ensuring proper rendering) ---
+
+        /**
+         * Returns the path data for a given shape.
+         */
+        function getShapePath(shape) {
+            // These paths are scaled to fit a 100x100 viewBox
+            switch (shape) {
+                case 'Circle': return 'M50,50 m-40,0 a40,40 0 1,0 80,0 a40,40 0 1,0 -80,0';
+                case 'Square': return 'M15,15 H85 V85 H15 Z';
+                case 'Star': return 'M50,15 L60,37 L85,38 L67,58 L77,85 L50,70 L23,85 L33,58 L15,38 L40,37 Z';
+                case 'Triangle': return 'M50,15 L85,85 L15,85 Z';
+                case 'Hexagon': return 'M50,15 L85,35 L85,65 L50,85 L15,65 L15,35 Z';
+                default: return '';
+            }
+        }
+
+        /**
+         * Creates the full SVG for an item based on its properties.
+         */
+        function createItemSVG(item) {
+            const shapePath = getShapePath(item.s);
+            const hexColor = COLOR_MAP[item.c] || '#FFFFFF'; // Get hex color
+            const patternId = `${item.p.toLowerCase()}-${item.c}-${item.index}`; 
+
+            let patternDef = '';
+            let fillUrl = hexColor;
+
+            // Pattern Definitions for Striped and Dotted
+            if (item.p === 'Striped') {
+                const stripeColor = '#E2E8F0'; // Slate-200 (light color for contrast)
+                patternDef = `
+                    <pattern id="${patternId}" width="10" height="10" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+                        <rect width="10" height="10" fill="${hexColor}" />
+                        <rect width="5" height="10" fill="${stripeColor}" opacity="0.4"/>
+                    </pattern>
+                `;
+                fillUrl = `url(#${patternId})`;
+            } else if (item.p === 'Dotted') {
+                const dotColor = '#E2E8F0'; // Slate-200
+                patternDef = `
+                    <pattern id="${patternId}" width="15" height="15" patternUnits="userSpaceOnUse">
+                        <rect width="15" height="15" fill="${hexColor}" />
+                        <circle cx="7.5" cy="7.5" r="3" fill="${dotColor}" opacity="0.6"/>
+                    </pattern>
+                `;
+                fillUrl = `url(#${patternId})`;
+            }
+
+            return `
+                <svg viewBox="0 0 100 100" class="w-full h-full p-2">
+                    <defs>
+                        ${patternDef}
+                    </defs>
+                    <path d="${shapePath}" fill="${fillUrl}" stroke="#1F2937" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+            `;
+        }
+
+        // --- 4. GAME LOGIC & DIFFICULTY ---
+
+        /**
+         * Calculates the time limit for the current level (Decreases difficulty).
+         */
+        function calculateLevelTime(level) {
+            const deduction = (level - 1) * 5;
+            return Math.max(BASE_TIME - deduction, 30); // Minimum time is 30 seconds
+        }
+        
+        /**
+         * Generates exactly 3 clues: Color, Shape, and Pattern.
+         */
+        function generateLevelClues(target) {
+            const clues = [
+                CLUE_TEMPLATES.C(target.c),
+                CLUE_TEMPLATES.S(target.s),
+                CLUE_TEMPLATES.P(target.p)
+            ];
+            // Shuffle the order so the revealed clue is random
+            for (let i = clues.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [clues[i], clues[j]] = [clues[j], clues[i]];
+            }
+            return clues;
+        }
+
+        /**
+         * Hides the current clue and resets the UI state.
+         */
+        function hideCurrentClue() {
+            clearTimeout(clueTimeout);
+            clearInterval(clueInterval);
+            clueTimeout = null;
+            clueInterval = null;
+
+            const clueDisplay = document.getElementById('current-clue-display');
+            const clueBar = document.getElementById('clue-timer-bar');
+            const revealButton = document.getElementById('reveal-next-clue-button');
+            const statusMessage = document.getElementById('clue-status-message');
+
+            clueDisplay.textContent = 'Clue hidden. Deduce now!';
+            clueDisplay.classList.remove('clue-visible');
+            clueDisplay.classList.add('clue-hidden');
+            clueBar.style.width = '0%';
+            
+            statusMessage.textContent = 'Remember the clue before it disappears!';
+
+            if (cluesRevealed < levelClues.length) {
+                revealButton.disabled = false;
+                revealButton.textContent = `Reveal Clue ${cluesRevealed + 1} (${levelClues.length - cluesRevealed} left)`;
+            } else {
+                revealButton.disabled = true;
+                revealButton.textContent = 'All Clues Revealed';
+            }
+        }
+
+        /**
+         * Reveals the next unrevealed clue for a limited time.
+         */
+        function revealNextClue(isPenalty = false) {
+            if (isGameOver) return;
+            
+            // 1. If a clue is already visible, clear its timer first.
+            if (clueTimeout) {
+                clearTimeout(clueTimeout);
+                clearInterval(clueInterval);
+            }
+
+            if (cluesRevealed < levelClues.length) {
+                cluesRevealed++;
+                const clueNumber = cluesRevealed;
+                const clueText = levelClues[clueNumber - 1];
+                
+                // --- START MAIN GAME TIMER ON FIRST CLUE REVEAL ---
+                if (clueNumber === 1 && !timerInterval) {
+                    startTimer(); 
+                }
+                // --------------------------------------------------
+                
+                const clueDisplay = document.getElementById('current-clue-display');
+                const clueNumberDisplay = document.getElementById('clue-number-display');
+                const clueBar = document.getElementById('clue-timer-bar');
+                const revealButton = document.getElementById('reveal-next-clue-button');
+                const statusMessage = document.getElementById('clue-status-message');
+
+                // 2. Display the clue
+                clueNumberDisplay.textContent = clueNumber;
+                clueDisplay.textContent = clueText;
+                clueDisplay.classList.remove('clue-hidden');
+                clueDisplay.classList.add('clue-visible');
+                revealButton.disabled = true;
+
+                if (isPenalty) {
+                    displayFeedback(`🚨 PENALTY! Clue ${clueNumber} Auto-Revealed for 10s.`, 'bg-red-700');
+                    statusMessage.textContent = 'Penalty triggered: This clue will vanish quickly!';
+                } else {
+                    displayFeedback(`Clue ${clueNumber} revealed for 10 seconds.`, 'bg-blue-700');
+                    statusMessage.textContent = 'Make your deduction and memorize the clue!';
+                }
+
+                // 3. Start the 10-second timer to hide it
+                clueTimeout = setTimeout(() => {
+                    hideCurrentClue();
+                    displayFeedback(`Clue ${clueNumber} hidden. Back to deduction!`, 'bg-slate-700');
+                }, CLUE_VISIBILITY_DURATION);
+
+                // 4. Start the timer bar animation
+                clueBar.style.width = '100%'; // Reset to full width
+                // Force a redraw before starting transition
+                void clueBar.offsetWidth; 
+                clueBar.style.transitionDuration = `${CLUE_VISIBILITY_DURATION / 1000}s`;
+                clueBar.style.width = '0%';
+                
+            } else {
+                // If all clues are revealed, hide the area and update the button state
+                hideCurrentClue();
+                document.getElementById('clue-number-display').textContent = levelClues.length;
+            }
+        }
+
+        /**
+         * Handles the user clicking an item to guess the target.
+         */
+        function handleGuess(event) {
+            if (isGameOver) return;
+
+            const targetShuffledIndex = targetItem.shuffledIndex;
+            const clickedShuffledIndex = parseInt(event.currentTarget.dataset.shuffledIndex);
+            const clickedItemEl = event.currentTarget;
+
+            if (clickedShuffledIndex === targetShuffledIndex) {
+                // Correct Guess - WIN LEVEL
+                clickedItemEl.classList.add('target-found');
+                stopTimer();
+                handleWin();
+            } else {
+                // Incorrect Guess - LOSE LIFE, APPLY PENALTY, REVEAL NEXT CLUE
+                currentLives--;
+                
+                // Only apply penalty if the main timer has started
+                if (timerInterval) {
+                    timeRemaining -= WRONG_GUESS_TIME_PENALTY; // Time Penalty!
+                }
+                
+                clickedItemEl.classList.add('eliminated'); // Eliminate wrong guess
+                clickedItemEl.classList.add('wrong-guess-effect');
+                
+                // 1. Hide the current clue immediately
+                if (clueTimeout) {
+                    hideCurrentClue();
+                }
+
+                updateTimerDisplay(); // Update timer immediately after penalty
+                updateStats();
+
+                if (currentLives <= 0) {
+                    gameOver(false, "lives");
+                } else if (timeRemaining <= 0) {
+                    gameOver(false, "time");
+                } else {
+                    // 2. Reveal next clue on wrong guess
+                    revealNextClue(true); 
+                    // Remove shake effect after animation ends
+                    setTimeout(() => clickedItemEl.classList.remove('wrong-guess-effect'), 500); 
+                }
+            }
+        }
+
+        /**
+         * Handles the level win logic.
+         */
+        function handleWin() {
+            // Clear any running clue timers upon winning
+            hideCurrentClue(); 
+
+            const timeBonus = timeRemaining > 0 ? timeRemaining * POINTS_PER_SECOND_BONUS : 0;
+            const levelPoints = POINTS_PER_LEVEL + timeBonus;
+            totalScore += levelPoints;
+            currentLevel++;
+
+            showModal('victory');
+        }
+
+        /**
+         * Handles game over conditions (Time or Lives).
+         */
+        function gameOver(win, reason) {
+            isGameOver = true;
+            stopTimer();
+            hideCurrentClue(); // Clear clue timer and UI
+            
+            // Save score before showing modal
+            if (totalScore > 0) saveScore();
+
+            // Highlight the true target if lost
+            if (!win) {
+                const trueTargetEl = document.querySelector(`.grid-item[data-shuffled-index="${targetItem.shuffledIndex}"]`);
+                if (trueTargetEl) {
+                    trueTargetEl.classList.remove('eliminated');
+                    trueTargetEl.classList.add('target-found');
+                }
+            }
+
+            showModal(win ? 'win' : 'loss', reason);
+        }
+
+
+        // --- 5. UI & STATS MANAGEMENT ---
+
+        /**
+         * Updates the UI statistics.
+         */
+        function updateStats() {
+            document.getElementById('current-level').textContent = currentLevel;
+            document.getElementById('current-score').textContent = totalScore;
+            document.getElementById('lives-display').innerHTML = '❤️'.repeat(currentLives) + '🤍'.repeat(MAX_LIVES - currentLives);
+            
+            // Update button text based on revealed count
+            const revealButton = document.getElementById('reveal-next-clue-button');
+            const remaining = levelClues.length - cluesRevealed;
+
+            if (clueTimeout) {
+                // If clue is visible, button is disabled
+                revealButton.disabled = true;
+                revealButton.textContent = `Clue Visible (Timer Active)`;
+            } else if (remaining > 0) {
+                // If clue is hidden and more remain
+                revealButton.disabled = false;
+                revealButton.textContent = `Reveal Clue ${cluesRevealed + 1} (${remaining} left)`;
+            } else {
+                // If all clues are revealed
+                revealButton.disabled = true;
+                revealButton.textContent = 'All Clues Revealed';
+            }
+        }
+
+        /**
+         * Updates the timer display.
+         */
+        function updateTimerDisplay() {
+            if (timeRemaining < 0) timeRemaining = 0; // Prevent negative display
+            const minutes = Math.floor(timeRemaining / 60);
+            const seconds = timeRemaining % 60;
+            document.getElementById('timer-display').textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+            
+            if (timeRemaining <= 15 && timeRemaining > 0) {
+                 document.getElementById('timer-display').classList.add('font-extrabold', 'text-red-400', 'animate-pulse');
+            } else {
+                 document.getElementById('timer-display').classList.remove('font-extrabold', 'text-red-400', 'animate-pulse');
+            }
+        }
+
+        /**
+         * Starts the countdown timer.
+         */
+        function startTimer() {
+            stopTimer(); // Ensure any old interval is cleared
+            
+            // Set time based on level difficulty (Only called once per level now)
+            // Note: timeRemaining is already set in startGame, so we just start the clock.
+            // timeRemaining = calculateLevelTime(currentLevel); 
+            // updateTimerDisplay(); // Already done in startGame
+
+            timerInterval = setInterval(() => {
+                timeRemaining--;
+                updateTimerDisplay();
+
+                if (timeRemaining <= 0) {
+                    gameOver(false, "time");
+                }
+            }, 1000);
+        }
+
+        /**
+         * Stops the countdown timer.
+         */
+        function stopTimer() {
+            clearInterval(timerInterval);
+            timerInterval = null; // Important: set to null so we know it's stopped
+            document.getElementById('timer-display').classList.remove('font-extrabold', 'text-red-400', 'animate-pulse');
+        }
+
+        /**
+         * Displays a temporary feedback message.
+         */
+        function displayFeedback(message, className) {
+            const feedbackEl = document.getElementById('feedback-message');
+            feedbackEl.innerHTML = message;
+            feedbackEl.className = `mt-6 p-4 rounded-xl text-slate-200 ${className} text-center font-semibold border-2 border-current`;
+            feedbackEl.classList.remove('hidden');
+
+            clearTimeout(window.feedbackTimer);
+            window.feedbackTimer = setTimeout(() => {
+                feedbackEl.classList.add('hidden');
+            }, 5000);
+        }
+
+        /**
+         * Displays the game modal for start, win, or loss.
+         */
+        function showModal(type, reason = null) {
+            const modal = document.getElementById('game-modal');
+            const title = document.getElementById('modal-title');
+            const message = document.getElementById('modal-message');
+            const actionButton = document.getElementById('modal-action-button');
+            const nameInput = document.getElementById('player-name-input');
+            const instructions = document.getElementById('instructions-content');
+            const target = targetItem; 
+
+            // Remove existing border colors
+            modal.querySelector('.border-4').classList.remove('border-blue-500', 'border-emerald-500', 'border-red-500');
+
+            if (type === 'start') {
+                title.textContent = 'Welcome, Data Sleuth!';
+                message.textContent = `Get ready to deduce the target! Enter your name to begin.`;
+                actionButton.textContent = 'Start Level 1';
+                actionButton.onclick = () => startGame(1);
+                modal.querySelector('.border-4').classList.add('border-blue-500');
+                actionButton.classList.remove('bg-emerald-600', 'bg-red-600');
+                actionButton.classList.add('bg-blue-600', 'shadow-blue-800/50');
+                nameInput.classList.remove('hidden');
+                instructions.classList.remove('hidden');
+            } else if (type === 'victory') {
+                const timeBonus = timeRemaining > 0 ? timeRemaining * POINTS_PER_SECOND_BONUS : 0;
+                const points = POINTS_PER_LEVEL + timeBonus;
+                title.textContent = '✅ Case Solved!';
+                message.innerHTML = `Target identified! You earned <strong>${points} points</strong> (Bonus: +${timeBonus} from time). The Target was the <span class="text-yellow-400">${target.c} ${target.s} (${target.p})</span>.`;
+                actionButton.textContent = `Proceed to Level ${currentLevel} (Time: ${calculateLevelTime(currentLevel)}s)`;
+                actionButton.onclick = () => startGame(currentLevel);
+                modal.querySelector('.border-4').classList.add('border-emerald-500');
+                actionButton.classList.remove('bg-blue-600', 'bg-red-600');
+                actionButton.classList.add('bg-emerald-600', 'shadow-emerald-800/50');
+                nameInput.classList.add('hidden');
+                instructions.classList.add('hidden');
+            } else if (type === 'loss') {
+                title.textContent = `💀 Deduction Failed`;
+                message.innerHTML = `Your final score is <strong>${totalScore}</strong>. You were defeated at Level ${currentLevel - 1}. The Target was the <span class="text-yellow-400">${target.c} ${target.s} (${target.p})</span>. Reason: <strong>${reason === 'time' ? 'Time Ran Out' : 'Lost All Lives'}</strong>.`;
+                actionButton.textContent = 'Retry Level 1';
+                actionButton.onclick = () => { currentLevel = 1; totalScore = 0; startGame(1); };
+                modal.querySelector('.border-4').classList.add('border-red-500');
+                actionButton.classList.remove('bg-blue-600', 'bg-emerald-600');
+                actionButton.classList.add('bg-red-600', 'shadow-red-800/50');
+                nameInput.classList.add('hidden');
+                instructions.classList.add('hidden');
+            }
+            modal.classList.remove('hidden');
+        }
+
+
+        // --- 6. FIREBASE/FIRESTORE INTEGRATION ---
+
+        async function initFirebase() {
+            try {
+                // Global vars provided by the environment
+                const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+                const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
+
+                if (Object.keys(firebaseConfig).length === 0) {
+                    console.error("Firebase config is missing.");
+                    return;
+                }
+                
+                const app = initializeApp(firebaseConfig);
+                auth = getAuth(app);
+                db = getFirestore(app);
+
+                // 1. Authenticate using the provided token or anonymously
+                const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+                if (initialAuthToken) {
+                    await signInWithCustomToken(auth, initialAuthToken);
+                } else {
+                    await signInAnonymously(auth);
+                }
+
+                // 2. Set up Auth State Listener
+                onAuthStateChanged(auth, (user) => {
+                    if (user) {
+                        userId = user.uid;
+                        isAuthReady = true;
+                        document.getElementById('user-id-display').textContent = `User ID: ${userId}`;
+                        loadLeaderboard();
+                    } else {
+                        userId = null; 
+                        isAuthReady = true;
+                        document.getElementById('user-id-display').textContent = 'User ID: Anonymous';
+                        loadLeaderboard();
+                    }
+                });
+
+            } catch (error) {
+                console.error("Error initializing Firebase:", error);
+            }
+        }
+
+        async function saveScore() {
+            if (!isAuthReady || !db || !userId) return;
+
+            // Get player name, sanitize it
+            const playerName = document.getElementById('player-name-input').value.trim().replace(/[^a-zA-Z0-9 ]/g, '') || `Sleuth-${userId.substring(0, 4)}`;
+            
+            // Public collection path for the leaderboard
+            const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+            const leaderboardCollectionPath = `/artifacts/${appId}/public/data/leaderboard`;
+
+            try {
+                // Retry logic for API call (Exponential Backoff)
+                const maxRetries = 3;
+                for (let i = 0; i < maxRetries; i++) {
+                    try {
+                        await addDoc(collection(db, leaderboardCollectionPath), {
+                            name: playerName,
+                            score: totalScore,
+                            level: currentLevel - 1,
+                            timestamp: Date.now(),
+                            userId: userId,
+                        });
+                        displayFeedback("Score saved to the real-time leaderboard!", 'bg-emerald-700');
+                        return; // Success, exit loop
+                    } catch (e) {
+                        if (i === maxRetries - 1) throw e; // Last retry, re-throw error
+                        const delay = Math.pow(2, i) * 1000;
+                        await new Promise(resolve => setTimeout(resolve, delay));
+                    }
+                }
+            } catch (e) {
+                console.error("Error adding document: ", e);
+                displayFeedback("Error saving score to leaderboard.", 'bg-red-800');
+            }
+        }
+
+        function loadLeaderboard() {
+            if (!isAuthReady || !db) return;
+
+            const leaderboardEl = document.getElementById('leaderboard');
+            const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+            const leaderboardCollectionPath = `/artifacts/${appId}/public/data/leaderboard`;
+
+            // Query the top 50 scores for sorting
+            const q = query(collection(db, leaderboardCollectionPath), limit(50));
+
+            onSnapshot(q, (querySnapshot) => {
+                let scores = [];
+                querySnapshot.forEach((doc) => {
+                    scores.push(doc.data());
+                });
+
+                // Sort scores locally by score descending
+                scores.sort((a, b) => b.score - a.score);
+                const topScores = scores.slice(0, 10); // Take only the top 10 for display
+
+                leaderboardEl.innerHTML = '';
+                if (topScores.length === 0) {
+                    leaderboardEl.innerHTML = '<li class="text-slate-500">Be the first to post a score!</li>';
+                    return;
+                }
+
+                topScores.forEach((entry, index) => {
+                    const li = document.createElement('li');
+                    li.className = 'py-1 flex justify-between items-center ' + (index === 0 ? 'text-yellow-400 font-bold text-lg' : 'text-slate-300');
+                    const rankIcon = index < 3 ? ['🏆', '🥈', '🥉'][index] : (index + 1) + '.';
+                    li.innerHTML = `
+                        <span class="flex items-center space-x-2">
+                            <span class="text-lg w-6 text-center">${rankIcon}</span>
+                            <span class="truncate">${entry.name}</span>
+                        </span>
+                        <span class="text-xl font-mono text-cyan-300">${entry.score}</span>
+                    `;
+                    leaderboardEl.appendChild(li);
+                });
+            }, (error) => {
+                console.error("Error listening to leaderboard:", error);
+                leaderboardEl.innerHTML = '<li class="text-red-400">Error loading scores.</li>';
+            });
+        }
+
+
+        // --- 7. INITIALIZATION AND SETUP ---
+
+        /**
+         * Sets up a new level with a new target and clues.
+         */
+        function startGame(level) {
+            // Clear all previous timers/intervals
+            stopTimer();
+            hideCurrentClue();
+
+            // Reset per-level state
+            currentLives = MAX_LIVES;
+            isGameOver = false;
+            cluesRevealed = 0;
+            currentLevel = level;
+
+            document.getElementById('game-modal').classList.add('hidden');
+            document.getElementById('feedback-message').classList.add('hidden');
+
+            // --- SHUFFLING LOGIC ---
+            let itemsForGrid = [...GRID_ITEMS_DEFINITION];
+            for (let i = itemsForGrid.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [itemsForGrid[i], itemsForGrid[j]] = [itemsForGrid[j], itemsForGrid[i]];
+            }
+
+            // Pick a random target item from the SHUFFLED list
+            const targetIndexInShuffled = Math.floor(Math.random() * itemsForGrid.length);
+            targetItem = { 
+                ...itemsForGrid[targetIndexInShuffled], 
+                shuffledIndex: targetIndexInShuffled 
+            };
+
+            // Generate and store clues for this target
+            levelClues = generateLevelClues(targetItem);
+
+            // Render the grid using the shuffled array
+            const gridEl = document.getElementById('game-grid');
+            gridEl.innerHTML = ''; // Clear previous grid
+
+            itemsForGrid.forEach((item, index) => {
+                const itemEl = document.createElement('div');
+                itemEl.className = 'grid-item bg-slate-700 hover:bg-slate-600 rounded-lg aspect-square flex items-center justify-center border-2 border-slate-600'; 
+                // Use shuffledIndex for click identification
+                itemEl.dataset.shuffledIndex = index; 
+                itemEl.innerHTML = createItemSVG(item);
+
+                itemEl.addEventListener('click', handleGuess);
+                gridEl.appendChild(itemEl);
+            });
+
+            // 1. Initialize Time and Display it, but DO NOT start the clock
+            timeRemaining = calculateLevelTime(currentLevel);
+            updateTimerDisplay(); 
+
+            // Initial clue state setup
+            document.getElementById('clue-number-display').textContent = 0;
+            document.getElementById('current-clue-display').textContent = `Press "Reveal Clue 1" to start the game timer and deduction!`;
+            document.getElementById('current-clue-display').classList.remove('clue-visible');
+            document.getElementById('current-clue-display').classList.add('clue-hidden');
+
+            // 5. Update stats
+            updateStats();
+            
+            // Set up button listener for manual clue reveal
+            document.getElementById('reveal-next-clue-button').onclick = () => revealNextClue();
+        }
+
+        // Global initialization function
+        function init() {
+            // Initialize Firebase first
+            initFirebase();
+            
+            // Show the starting modal
+            showModal('start');
+        }
+
+        window.onload = init;
+    </script>
+</body>
+</html>
